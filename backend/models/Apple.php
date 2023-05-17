@@ -2,40 +2,45 @@
 
 namespace backend\models;
 
-use Yii;
-use yii\behaviors\TimestampBehavior;
-use yii\db\Expression;
+use DateTime;
 use ValueError;
+use LogicException;
+use Yii;
+use yii\behaviors\AttributeTypecastBehavior;
 
 /**
  * This is the model class for table "apple".
  *
  * @property int $id
  * @property int $color_index
- * @property int $status_code
+ * @property int $status
  * @property float $eaten_fraction
  * @property int $created_at
  * @property int|null $fell_at
+ * @property string $color
+ * @property DateTime $createdAt
  */
 class Apple extends \yii\db\ActiveRecord
 {
-    const COLOR_GREEN = 0;
-    const COLOR_YELLOW = 1;
-    const COLOR_RED = 2;
+    const COLOR_GREEN = 'green';
+    const COLOR_YELLOW = 'yellow';
+    const COLOR_RED = 'red';
     const COLOR_LIST = [
-        self::COLOR_GREEN => 'green',
-        self::COLOR_YELLOW => 'yellow',
-        self::COLOR_RED => 'red',
+        self::COLOR_GREEN,
+        self::COLOR_YELLOW,
+        self::COLOR_RED,
     ];
 
     const STATUS_HANGING_ON_TREE = 0;
     const STATUS_FELL = 1;
     const STATUS_ROTTEN = 2;
+    const STATUS_TEXT_LIST = [
+        self::STATUS_HANGING_ON_TREE => 'hanging on a tree',
+        self::STATUS_FELL => 'fell to the ground',
+        self::STATUS_ROTTEN => 'rotten',
+    ];
 
-    /* defaults */
-    public int $color_index = self::COLOR_GREEN;
-    public int $status_code = self::STATUS_HANGING_ON_TREE;
-    public float $eaten_fraction = 0;
+    const ROTTING_TIME_HOURS = 5;
 
     /**
      * {@inheritdoc}
@@ -45,27 +50,45 @@ class Apple extends \yii\db\ActiveRecord
         return 'apple';
     }
 
-    public function __construct(string $color = null)
+    public function __construct(string $color = null, $config = [])
     {
-        if (is_null($color)) {
-            $this->color_index = random_int(0, count(self::COLOR_LIST) - 1);
-        } else {
+        parent::__construct($config);
+        if (!is_null($color)) {
             $this->color = $color;
         }
     }
 
+    public function init() {
+        parent::init();
+        $this->color_index = random_int(0, count(self::COLOR_LIST) - 1);
+        $this->created_at = random_int(0, time());
+        $this->status = self::STATUS_HANGING_ON_TREE;
+        $this->eaten_fraction = 0;
+    }
+
     public function behaviors()
     {
+        $castDateTimeFunc = fn($value) => ($value instanceof DateTime) 
+            ? $value->getTimestamp() 
+            : $value;
         return [
-            TimestampBehavior::class,
-            'updatedAtAttribute' => null,
-            'value' => new Expression('NOW()'),
+            'typecast' => [
+                'class' => AttributeTypecastBehavior::class,
+                'attributeTypes' => [
+                    'created_at' => $castDateTimeFunc,
+                    'fell_at' => $castDateTimeFunc,
+                ],
+                'typecastAfterValidate' => false,
+                'typecastBeforeSave' => true,
+                'typecastAfterFind' => false,
+            ],
         ];
     }
 
     public function fallToGround(): void
     {
-        $this->status_code = static::STATUS_FELL;
+        $this->status = static::STATUS_FELL;
+        $this->fellAt = new DateTime();
         $this->save();
     }
 
@@ -74,8 +97,8 @@ class Apple extends \yii\db\ActiveRecord
         if (!$this->isEatable()) {
             throw new LogicException('The apple is not eatable!');
         }
-        $this->eaten_fraction = min(1, eaten_fraction + $percent / 100);
-        if ($apple->eaten_fraction === 1) {
+        $this->eaten_fraction = min(1, $this->eaten_fraction + $percent / 100);
+        if ($this->eaten_fraction === 1) {
             $this->delete();
             return;
         }
@@ -84,12 +107,30 @@ class Apple extends \yii\db\ActiveRecord
 
     public function isEatable(): bool
     {
-        return $this->status = self::STATUS_FELL;
+        return $this->status === self::STATUS_FELL;
     }
 
     public function getSize(): float
     {
         return 1 - $this->eaten_fraction;
+    }
+
+    public function updateStatus(): self
+    {
+        if ($this->status === self::STATUS_FELL 
+            && $this->rottingAt < new DateTime()
+        ) {
+            $this->status = self::STATUS_ROTTEN;
+            $this->save();
+        }
+        return $this;
+    }
+
+    public function getRottingAt(): ?DateTime
+    {
+        return $this->hasFellAt()
+            ? (clone $this->getFellAt())->modify('+' . self::ROTTING_TIME_HOURS . ' hour')
+            : null;
     }
 
     public function getColor(): string
@@ -105,6 +146,45 @@ class Apple extends \yii\db\ActiveRecord
         }
         $this->color_index = $colorIndex;
     }
+
+    public function getCreatedAt(): DateTime
+    {
+        if (! $this->created_at instanceof DateTime) {
+            $this->created_at = DateTime::createFromFormat('U', $this->created_at);
+        }
+        return $this->created_at;
+    }
+
+    public function setCreatedAt(DateTime $value): self
+    {
+        $this->created_at = $value;
+        return $this;
+    }
+
+    public function hasFellAt(): bool
+    {
+        return !is_null($this->fellAt);
+    }
+
+    public function getFellAt(): ?DateTime
+    {
+        if (!is_null($this->fell_at) && ! $this->fell_at instanceof DateTime) {
+            $this->fell_at = DateTime::createFromFormat('U', $this->fell_at);
+        }
+        return $this->fell_at;
+    }
+
+    public function setFellAt(DateTime $value): self
+    {
+        $this->fell_at = $value;
+        return $this;
+    }
+
+    public function getStatusText(): string
+    {
+        return self::STATUS_TEXT_LIST[$this->status];
+    }
+
 
     /**
      * {@inheritdoc}

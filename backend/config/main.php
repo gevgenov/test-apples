@@ -46,5 +46,6 @@ return [
         ],
         */
     ],
+    'defaultRoute' => 'apple/index',
     'params' => $params,
 ];
