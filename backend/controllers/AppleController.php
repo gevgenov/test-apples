@@ -2,17 +2,37 @@
 
 namespace backend\controllers;
 
-use backend\models\Apple;
+use Yii;
 use yii\data\ActiveDataProvider;
 use yii\web\Controller;
 use yii\web\NotFoundHttpException;
 use yii\filters\VerbFilter;
+use yii\base\Module;
+use yii\web\Request;
+use backend\models\Apple;
+use backend\models\forms\EatPercentForm;
+use backend\services\AppleService;
 
 /**
  * AppleController implements the CRUD actions for Apple model.
  */
 class AppleController extends Controller
 {
+    const GENERATE_MIN = 5;
+    const GENERATE_MAX = 15;
+
+    private AppleService $appleService;
+
+    public function __construct(
+        string $id, 
+        Module $module, 
+        AppleService $appleService, 
+        $config = []
+    ) {
+        parent::__construct($id, $module, $config);    
+        $this->appleService = $appleService;
+    }
+
     /**
      * @inheritDoc
      */
@@ -38,6 +58,61 @@ class AppleController extends Controller
      */
     public function actionIndex()
     {
+        return $this->render('index', [
+            'dataProvider' => $this->getDataProvider(),
+        ]);
+    }
+
+    public function actionGenerate(Request $request)
+    {
+        $this->appleService
+             ->clean()
+             ->generate(self::GENERATE_MIN, self::GENERATE_MAX);
+
+        if ($request->isPjax) {
+            return $this->renderPartial('index', [
+                'dataProvider' => $this->getDataProvider(),
+            ]);
+        }
+
+        return $this->redirect(['index']);
+    }
+
+    public function actionFall(Request $request, int $id)
+    {
+        $model = $this->findModel($id);
+        $model->fallToGround();
+
+        if ($request->isPjax) {
+            return $this->renderPartial('index', [
+                'dataProvider' => $this->getDataProvider(),
+            ]);
+        }
+
+        return $this->redirect(['index']);
+    }
+
+    public function actionEat(Request $request, int $id)
+    {
+        $model = $this->findModel($id);
+        $form = new EatPercentForm($model);
+
+        if ($request->isPost && $form->load($request->post()) && $form->validate()) {
+            $model->eat($form->percent);
+        } 
+
+        if ($request->isPjax) {
+            return $this->renderPartial('index', [
+                'dataProvider' => $this->getDataProvider(),
+            ]);
+        }
+
+        return $this->redirect(['index']);
+    }
+
+
+    private function getDataProvider(): ActiveDataProvider
+    {
         $dataProvider = new ActiveDataProvider([
             'query' => Apple::find(),
             /*
@@ -52,64 +127,7 @@ class AppleController extends Controller
             */
         ]);
 
-        return $this->render('index', [
-            'dataProvider' => $dataProvider,
-        ]);
-    }
-
-    /**
-     * Displays a single Apple model.
-     * @param int $id
-     * @return string
-     * @throws NotFoundHttpException if the model cannot be found
-     */
-    public function actionView($id)
-    {
-        return $this->render('view', [
-            'model' => $this->findModel($id),
-        ]);
-    }
-
-    /**
-     * Creates a new Apple model.
-     * If creation is successful, the browser will be redirected to the 'view' page.
-     * @return string|\yii\web\Response
-     */
-    public function actionCreate()
-    {
-        $model = new Apple();
-
-        if ($this->request->isPost) {
-            if ($model->load($this->request->post()) && $model->save()) {
-                return $this->redirect(['view', 'id' => $model->id]);
-            }
-        } else {
-            $model->loadDefaultValues();
-        }
-
-        return $this->render('create', [
-            'model' => $model,
-        ]);
-    }
-
-    /**
-     * Updates an existing Apple model.
-     * If update is successful, the browser will be redirected to the 'view' page.
-     * @param int $id
-     * @return string|\yii\web\Response
-     * @throws NotFoundHttpException if the model cannot be found
-     */
-    public function actionUpdate($id)
-    {
-        $model = $this->findModel($id);
-
-        if ($this->request->isPost && $model->load($this->request->post()) && $model->save()) {
-            return $this->redirect(['view', 'id' => $model->id]);
-        }
-
-        return $this->render('update', [
-            'model' => $model,
-        ]);
+        return $dataProvider;
     }
 
     /**
@@ -122,6 +140,10 @@ class AppleController extends Controller
     public function actionDelete($id)
     {
         $this->findModel($id)->delete();
+
+        if ($request->isPjax) {
+            return $this->renderIndex();
+        }
 
         return $this->redirect(['index']);
     }
